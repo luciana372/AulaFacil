@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "TipoEspacio" AS ENUM ('AULA', 'LABORATORIO', 'AUDITORIO', 'SALA_REUNIONES', 'ESPACIO_DEPORTIVO');
+
+-- AlterTable
+ALTER TABLE "Aula" ADD COLUMN     "tipo" "TipoEspacio" NOT NULL DEFAULT 'AULA';

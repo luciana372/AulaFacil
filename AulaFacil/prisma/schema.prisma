@@ -1,0 +1,400 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  PROFESOR
+  ALUMNO
+}
+
+enum EstadoSolicitud {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+  CANCELADA
+}
+
+enum EstadoReporte {
+  PENDIENTE
+  RESUELTO
+}
+
+enum TipoEspacio {
+  AULA
+  LABORATORIO
+  AUDITORIO
+  SALA_REUNIONES
+  ESPACIO_DEPORTIVO
+}
+
+enum TipoEquipamiento {
+  PROYECTOR
+  PC
+  PIZARRA_DIGITAL
+}
+
+enum OrigenHorario {
+  MANUAL
+  OFICIAL
+}
+
+enum DiaSemana {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+}
+
+// Orden de declaración = orden de prioridad: CATEDRA > INVESTIGACION > LIBRE
+enum TipoUso {
+  CATEDRA
+  INVESTIGACION
+  LIBRE
+}
+
+model Usuario {
+  id           String   @id @default(cuid())
+  nombre       String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  // Si tiene fecha futura, sus solicitudes quedan con la prioridad más baja (por inasistencias reiteradas)
+  penalizadoHasta     DateTime?
+
+  // Solo relevante para ALUMNO: define qué clases le corresponde ver
+  carrera   Carrera? @relation(fields: [carreraId], references: [id])
+  carreraId String?
+
+  // Un profesor dicta clases; un alumno ve las clases de su carrera
+  solicitudes    Solicitud[]      @relation("SolicitudesDelProfesor")
+  clasesDictadas Clase[]          @relation("ClasesDelProfesor")
+  cambiosRealizados HistorialSolicitud[]
+  notificaciones    Notificacion[]
+  favoritos         Favorito[]
+  valoraciones      Valoracion[]
+  reportes          ReporteAula[]
+  ingresos          Ingreso[]
+  resetTokens       PasswordResetToken[]
+  recordatorios     Recordatorio[]
+  auditLogs         AuditLog[]
+  bloqueosCreados   BloqueoFecha[]
+  apiKeysCreadas    ApiKey[]
+}
+
+// Carrera/programa de estudio: agrupa a los alumnos y a las clases que les corresponden
+model Carrera {
+  id        String   @id @default(cuid())
+  nombre    String   @unique
+  createdAt DateTime @default(now())
+
+  alumnos Usuario[]
+  clases  Clase[]
+}
+
+// Token de un solo uso para el flujo de "olvidé mi contraseña", enviado por email
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  usuario   Usuario   @relation(fields: [usuarioId], references: [id])
+  usuarioId String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Aula {
+  id           String             @id @default(cuid())
+  nombre       String             @unique
+  capacidad    Int
+  ubicacion    String?
+  tipo         TipoEspacio        @default(AULA)
+  equipamiento TipoEquipamiento[] @default([])
+  habilitada   Boolean            @default(false)
+  motivoBloqueo String?
+  requiereAprobacion Boolean      @default(true)
+  createdAt    DateTime           @default(now())
+
+  // Sede/campus al que pertenece (opcional: instituciones de un solo edificio pueden dejarlo vacío)
+  sede   Sede?   @relation(fields: [sedeId], references: [id])
+  sedeId String?
+
+  solicitudes Solicitud[]
+  horarios    Horario[]
+  favoritos   Favorito[]
+  valoraciones Valoracion[]
+  reportes    ReporteAula[]
+  esperas     ListaEsperaHorario[]
+  bloqueos    BloqueoFecha[]
+}
+
+// Sede/campus físico de la universidad, si tiene más de uno
+model Sede {
+  id        String   @id @default(cuid())
+  nombre    String   @unique
+  direccion String?
+  createdAt DateTime @default(now())
+
+  aulas Aula[]
+}
+
+// Un usuario reporta un problema en un aula (proyector roto, falta de limpieza, etc.)
+model ReporteAula {
+  id          String        @id @default(cuid())
+  usuario     Usuario       @relation(fields: [usuarioId], references: [id])
+  usuarioId   String
+  aula        Aula          @relation(fields: [aulaId], references: [id])
+  aulaId      String
+  descripcion String
+  estado      EstadoReporte @default(PENDIENTE)
+  createdAt   DateTime      @default(now())
+  resueltaAt  DateTime?
+}
+
+// Un usuario marca un aula como preferida
+model Favorito {
+  id        String   @id @default(cuid())
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  usuarioId String
+  aula      Aula     @relation(fields: [aulaId], references: [id])
+  aulaId    String
+  createdAt DateTime @default(now())
+
+  @@unique([usuarioId, aulaId])
+}
+
+// Puntaje (1-5) + comentario opcional de un usuario sobre un aula; una valoración por usuario y aula
+model Valoracion {
+  id         String   @id @default(cuid())
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id])
+  usuarioId  String
+  aula       Aula     @relation(fields: [aulaId], references: [id])
+  aulaId     String
+  puntaje    Int
+  comentario String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([usuarioId, aulaId])
+}
+
+model Materia {
+  id     String  @id @default(cuid())
+  nombre String  @unique
+  clases Clase[]
+}
+
+// Una clase es "la materia X dictada por el profesor Y para la carrera Z"
+model Clase {
+  id          String   @id @default(cuid())
+  materia     Materia  @relation(fields: [materiaId], references: [id])
+  materiaId   String
+  profesor    Usuario  @relation("ClasesDelProfesor", fields: [profesorId], references: [id])
+  profesorId  String
+  carrera     Carrera  @relation(fields: [carreraId], references: [id])
+  carreraId   String
+  createdAt   DateTime @default(now())
+
+  horarios     Horario[]
+  solicitudes  Solicitud[]
+  esperas      ListaEsperaHorario[]
+}
+
+// Pedido de un profesor para que la administración le asigne un aula/horario a una clase
+model Solicitud {
+  id         String          @id @default(cuid())
+  clase      Clase           @relation(fields: [claseId], references: [id])
+  claseId    String
+  profesor   Usuario         @relation("SolicitudesDelProfesor", fields: [profesorId], references: [id])
+  profesorId String
+  aula       Aula?           @relation(fields: [aulaId], references: [id])
+  aulaId     String?
+  estado     EstadoSolicitud @default(PENDIENTE)
+  tipoUso    TipoUso         @default(CATEDRA)
+  comentario String?
+  createdAt  DateTime        @default(now())
+  resueltaAt DateTime?
+
+  // Recurrencia pedida por el profesor en un solo paso (p.ej. "martes y jueves de 14 a 16")
+  diasPreferidos       DiaSemana[] @default([])
+  horaInicioPreferida  String?
+  horaFinPreferida     String?
+
+  historial      HistorialSolicitud[]
+  notificaciones Notificacion[]
+}
+
+// Un renglón por cada cambio de estado de una solicitud, para tener trazabilidad completa
+model HistorialSolicitud {
+  id             String           @id @default(cuid())
+  solicitud      Solicitud        @relation(fields: [solicitudId], references: [id])
+  solicitudId    String
+  estadoAnterior EstadoSolicitud?
+  estadoNuevo    EstadoSolicitud
+  actor          Usuario?         @relation(fields: [actorId], references: [id])
+  actorId        String?
+  comentario     String?
+  createdAt      DateTime         @default(now())
+}
+
+// Aviso in-app para un usuario, disparado por un cambio de estado de una solicitud
+model Notificacion {
+  id          String     @id @default(cuid())
+  usuario     Usuario    @relation(fields: [usuarioId], references: [id])
+  usuarioId   String
+  mensaje     String
+  leida       Boolean    @default(false)
+  solicitud   Solicitud? @relation(fields: [solicitudId], references: [id])
+  solicitudId String?
+  createdAt   DateTime   @default(now())
+}
+
+// Franja horaria fija asignada por administración: aula + clase + día + hora
+model Horario {
+  id        String    @id @default(cuid())
+  clase     Clase     @relation(fields: [claseId], references: [id])
+  claseId   String
+  aula      Aula      @relation(fields: [aulaId], references: [id])
+  aulaId    String
+  dia       DiaSemana
+  horaInicio String   // "08:00"
+  horaFin    String   // "09:30"
+  // MANUAL: lo creó un admin acá. OFICIAL: vino de la importación del sistema académico.
+  origen    OrigenHorario @default(MANUAL)
+
+  ingresos      Ingreso[]
+  recordatorios Recordatorio[]
+  ausencias     Ausencia[]
+
+  @@unique([aulaId, dia, horaInicio])
+}
+
+// Confirmación de que un profesor efectivamente dio clase en un aula en un día puntual (check-in por QR)
+model Ingreso {
+  id         String   @id @default(cuid())
+  horario    Horario  @relation(fields: [horarioId], references: [id])
+  horarioId  String
+  profesor   Usuario  @relation(fields: [profesorId], references: [id])
+  profesorId String
+  fecha      DateTime @db.Date
+  createdAt  DateTime @default(now())
+
+  @@unique([horarioId, fecha])
+}
+
+// Se registra cuando un profesor no hizo check-in dentro del margen y se considera "no show" ese día
+model Ausencia {
+  id        String   @id @default(cuid())
+  horario   Horario  @relation(fields: [horarioId], references: [id])
+  horarioId String
+  fecha     DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  @@unique([horarioId, fecha])
+}
+
+// Un alumno pide que le avisen antes de que empiece una clase puntual (horario)
+model Recordatorio {
+  id           String   @id @default(cuid())
+  alumno       Usuario  @relation(fields: [alumnoId], references: [id])
+  alumnoId     String
+  horario      Horario  @relation(fields: [horarioId], references: [id])
+  horarioId    String
+  minutosAntes Int      @default(15)
+  createdAt    DateTime @default(now())
+
+  envios RecordatorioEnviado[]
+
+  @@unique([alumnoId, horarioId])
+}
+
+// Registro de que ya se envió el aviso de un Recordatorio en un día puntual (evita duplicados)
+model RecordatorioEnviado {
+  id             String       @id @default(cuid())
+  recordatorio   Recordatorio @relation(fields: [recordatorioId], references: [id])
+  recordatorioId String
+  fecha          DateTime     @db.Date
+  createdAt      DateTime     @default(now())
+
+  @@unique([recordatorioId, fecha])
+}
+
+// Fila única (id fijo "singleton") con las reglas globales de reserva que configura el admin
+model ConfiguracionReservas {
+  id                                String   @id @default("singleton")
+  anticipacionMinDias               Int      @default(0)
+  anticipacionMaxDias               Int      @default(30)
+  duracionMaximaMinutos             Int      @default(180)
+  maxReservasSimultaneasPorUsuario  Int      @default(5)
+  updatedAt                         DateTime @updatedAt
+}
+
+// Una clase quiere un aula+día+hora puntual que ya está ocupada; se avisa si se libera
+model ListaEsperaHorario {
+  id         String    @id @default(cuid())
+  clase      Clase     @relation(fields: [claseId], references: [id])
+  claseId    String
+  aula       Aula      @relation(fields: [aulaId], references: [id])
+  aulaId     String
+  dia        DiaSemana
+  horaInicio String
+  horaFin    String
+  createdAt  DateTime  @default(now())
+
+  @@unique([claseId, aulaId, dia, horaInicio])
+}
+
+// Registro genérico de auditoría: quién hizo qué, sobre qué entidad, y cuándo
+model AuditLog {
+  id        String   @id @default(cuid())
+  actor     Usuario? @relation(fields: [actorId], references: [id])
+  actorId   String?
+  accion    String
+  entidad   String
+  entidadId String
+  detalle   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Bloqueo de una o todas las aulas durante un rango de fechas puntuales (feriados, semana de exámenes, eventos)
+model BloqueoFecha {
+  id          String   @id @default(cuid())
+  fechaInicio DateTime @db.Date
+  fechaFin    DateTime @db.Date
+  aula        Aula?    @relation(fields: [aulaId], references: [id])
+  aulaId      String?
+  motivo      String
+  creadoPor   Usuario  @relation(fields: [creadoPorId], references: [id])
+  creadoPorId String
+  createdAt   DateTime @default(now())
+}
+
+// Clave para que sistemas externos de la universidad consuman la API pública de solo lectura (/api/v1/*).
+// Se guarda el hash (sha256), nunca el valor en texto plano — ese solo se muestra una vez, al crearla.
+model ApiKey {
+  id          String    @id @default(cuid())
+  nombre      String
+  claveHash   String    @unique
+  prefijo     String
+  activa      Boolean   @default(true)
+  creadoPor   Usuario   @relation(fields: [creadoPorId], references: [id])
+  creadoPorId String
+  ultimoUsoAt DateTime?
+  createdAt   DateTime  @default(now())
+}
