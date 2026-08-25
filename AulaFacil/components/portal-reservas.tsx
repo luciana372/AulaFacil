@@ -189,10 +189,10 @@ export function PortalReservas() {
           <CardTitle>Mis reservas</CardTitle>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger
-              render={<Button size="sm" disabled={clases.length === 0} />}
+              render={<Button size="sm" disabled={loading || clases.length === 0} />}
             >
               <PlusIcon />
-              Nueva solicitud
+              {loading ? "Cargando..." : "Nueva solicitud"}
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
